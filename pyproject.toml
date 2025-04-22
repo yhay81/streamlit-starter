@@ -1,0 +1,58 @@
+[project]
+name = "streamlit-starter"
+version = "0.1.0"
+description = "Streamlit / Shiny サンプル付きデータアプリ開発テンプレート"
+readme = "README.md"
+authors = [{name = "Yusuke Hayashi", email = "yusuke8h@gmail.com"}]
+requires-python = ">=3.13"
+dependencies = [
+    "altair>=5.5.0",
+    "matplotlib>=3.10.1",
+    "numpy>=2.2.5",
+    "openai>=1.75.0",
+    "pandas>=2.2.3",
+    "pillow>=11.2.1",
+    "pydantic>=2.11.3",
+    "pydantic-settings>=2.9.1",
+    "shiny>=1.4.0",
+    "streamlit>=1.44.1",
+    "streamlit-extras>=0.6.0",
+    "tiktoken>=0.9.0",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.15.0",
+    "pandas-stubs>=2.2.3.250308",
+    "pre-commit>=4.2.0",
+    "pytest>=8.3.5",
+    "ruff>=0.11.6",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+
+[tool.ruff.lint]
+extend-select = ["ALL"]
+# 現在厳しいルールを設定しています。必要に応じてignoreに追加することで緩和してください。
+ignore = [
+    "D",
+    "E501",
+    "COM",
+    "T201",
+    "ERA001",
+    "PD901",
+    "PLR",
+    "PGH003",
+    "RUF001",
+    "RUF002",
+    "RUF003"
+]
+
+[tool.mypy]
+plugins = [
+    "pydantic.mypy",
+]
+strict = true
+warn_unreachable = true

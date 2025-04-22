@@ -1,0 +1,71 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      # ---------- セキュリティ & サイズ ----------
+      - id: check-added-large-files           # 大きいファイル禁止
+        args: [--maxkb=1000, --enforce-all]    # 100 KB 超は失敗・全ファイル対象
+      - id: detect-aws-credentials            # AWS 資格情報検出
+        args: [--allow-missing-credentials]
+      - id: detect-private-key                # 秘密鍵検出
+      - id: forbid-submodules                 # いかなる submodule も禁止
+
+      # ---------- コード健全性 ----------
+      - id: check-ast                         # Python AST 構文エラー検出
+      # - id: check-builtin-literals            # 空の list/dict などはリテラル必須
+      # - id: debug-statements                  # print / breakpoint 削除
+      # - id: double-quote-string-fixer         # ダブルクオート→シングルクオート
+      - id: name-tests-test                   # テストファイルは test_*.py のみ許可
+        args: [--pytest-test-first]
+
+      # ---------- フォーマット & 改行 ----------
+      - id: end-of-file-fixer                 # 最終行は LF １つだけ
+      - id: trailing-whitespace               # 行末スペース削除
+      - id: mixed-line-ending                 # 改行コードを LF に統一
+        args: [--fix=lf]
+      # - id: pretty-format-json                # JSON は整形して鍵をソート
+      #   args: [--autofix]                     # 自動修正
+      # - id: requirements-txt-fixer            # requirements.txt 並べ替え
+      - id: fix-byte-order-marker             # UTF‑8 BOM 除去
+
+      # ---------- メタデータ / 構成ファイル検証 ----------
+      - id: check-json                        # JSON 構文検証
+        exclude: devcontainer.json
+      - id: check-yaml                        # YAML 構文検証（multi‑doc / unsafe 不可）
+      - id: check-toml                        # TOML 構文検証
+      - id: check-xml                         # XML 構文検証
+      - id: check-vcs-permalinks              # GitHub などのパーマリンク強制
+
+      # ---------- git 運用補助 ----------
+      - id: check-case-conflict               # Mac/Windows で衝突するファイル名検出
+      # - id: check-docstring-first             # モジュール先頭に docstring 必須
+      # - id: check-executables-have-shebangs   # 実行可能ファイルは shebang 必須
+      - id: check-shebang-scripts-are-executable
+      - id: check-illegal-windows-names       # Windows で作成不可の名前検出
+      - id: check-symlinks                    # 壊れた symlink 検出
+      - id: destroyed-symlinks                # symlink → 通常ファイル化の検出
+      - id: check-merge-conflict              # マージ衝突文字列の残りを検出
+      # - id: no-commit-to-branch               # main / master 等への直接コミット禁止
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.6
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.7
+    hooks:
+      - id: actionlint
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.17.2
+    hooks:
+    - id: markdownlint-cli2
+  - repo: https://github.com/AleksaC/terraform-py
+    rev: v1.11.4
+    hooks:
+      - id: tf-fmt
+      - id: tf-validate
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.24.2
+    hooks:
+      - id: gitleaks

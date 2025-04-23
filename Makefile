@@ -62,18 +62,18 @@ lint: ## コードの静的解析
 # ローカルアプリ実行
 # --------------------------------------------------------------
 .PHONY: run-csv
-run-csv: ## CSV ダッシュボード (http://localhost:8080)
-	$(STREAMLIT_CMD) $(CSV_APP) --server.port 8080
+run-csv: ## CSV ダッシュボード (http://localhost:8501)
+	$(STREAMLIT_CMD) $(CSV_APP) --server.port 8501
 
 .PHONY: run-markdown
 run-markdown: ## Markdown サマライザー (要 OPENAI_API_KEY)
 	@if [ -z "$${OPENAI_API_KEY:-}" ]; then \
 	  echo "[WARN] OPENAI_API_KEY が未設定です"; fi
-	$(STREAMLIT_CMD) $(MD_APP) --server.port 8080
+	$(STREAMLIT_CMD) $(MD_APP) --server.port 8502
 
 .PHONY: run-shiny
-run-shiny: ## Shiny デモ (http://localhost:8080)
-	$(SHINY_CMD) $(SHINY_APP) --port 8080
+run-shiny: ## Shiny デモ (http://localhost:8503)
+	$(SHINY_CMD) $(SHINY_APP) --port 8503
 
 # --------------------------------------------------------------
 # Docker
@@ -84,15 +84,15 @@ docker-build: ## 本番用 Docker イメージをビルド
 
 .PHONY: docker-run-csv
 docker-run-csv: docker-build ## CSV ダッシュボードを Docker で実行
-	docker run --rm -p 8080:8080 $(DOCKER_IMAGE) csv_dashboard
+	docker run --rm -p 8501:8501 $(DOCKER_IMAGE) csv_dashboard
 
 .PHONY: docker-run-markdown
 docker-run-markdown: docker-build ## Markdown サマライザー (要 OPENAI_API_KEY)
-	docker run --rm -p 8080:8080 -e OPENAI_API_KEY=$$OPENAI_API_KEY $(DOCKER_IMAGE) markdown_summarizer
+	docker run --rm -p 8502:8502 -e OPENAI_API_KEY=$$OPENAI_API_KEY $(DOCKER_IMAGE) markdown_summarizer
 
 .PHONY: docker-run-shiny
 docker-run-shiny: docker-build ## Shiny デモを Docker で実行
-	docker run --rm -p 8080:8080 $(DOCKER_IMAGE)
+	docker run --rm -p 8503:8503 $(DOCKER_IMAGE)
 
 
 # --------------------------------------------------------------

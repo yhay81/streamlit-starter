@@ -1,63 +1,104 @@
 # ============================================================================
-# グローバル設定（環境変数で上書き可）
+# 共通 – 変数
 # ============================================================================
 AWS_PROFILE ?= default
 AWS_REGION  ?= ap-northeast-1
-ECR_REPO    ?= streamlit-suite
-TAG         ?= $(shell git -C $(ROOT_DIR) rev-parse --short HEAD)
 
-# 変数派生
-ACCOUNT_ID  := $(shell aws sts get-caller-identity  \
-                      --profile $(AWS_PROFILE) --query Account --output text)
-ECR_URI     := $(ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com/$(ECR_REPO)
-ROOT_DIR    := $(strip $(abspath $(CURDIR)/..))
+# ── Streamlit App（既存）
+APP_ECR_REPO ?= streamlit-suite
+APP_DOCKERFILE ?= $(ROOT_DIR)/Dockerfile
+APP_CONTEXT    ?= $(ROOT_DIR)
+
+# ── Nginx Proxy（新規）
+PROXY_ECR_REPO ?= streamlit-proxy
+PROXY_DOCKERFILE ?= $(ROOT_DIR)/infra/proxy/Dockerfile
+PROXY_CONTEXT    ?= $(ROOT_DIR)/infra/proxy
+
+# Git SHA をタグに利用
+TAG ?= $(shell git -C $(ROOT_DIR) rev-parse --short HEAD)
+
+# 便利変数
+ACCOUNT_ID := $(shell aws sts get-caller-identity \
+	                --profile $(AWS_PROFILE) --query Account --output text)
+ECR_URI     = $(ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com
+APP_ECR_URI    = $(ECR_URI)/$(APP_ECR_REPO)
+PROXY_ECR_URI  = $(ECR_URI)/$(PROXY_ECR_REPO)
+ROOT_DIR   := $(strip $(abspath $(CURDIR)/..))
+
+.PHONY: login build build-app build-proxy push push-app push-proxy \
+        plan apply deploy deploy-all fmt destroy
 
 # ============================================================================
-# ターゲット
+# 0) ECR ログイン
 # ============================================================================
-.PHONY: login build push plan apply deploy destroy fmt
-
-## 1) ECR ログイン
 login:
 	@echo "🔑  Logging in to ECR ($(AWS_PROFILE))"
 	@aws ecr get-login-password --profile $(AWS_PROFILE) --region $(AWS_REGION) \
-	    | docker login --username AWS --password-stdin \
-	      $(ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com
+	    | docker login --username AWS --password-stdin $(ECR_URI)
 
-## 2) Docker ビルド（latest & TAG）
-build:
-	@echo "🐳  Docker build: $(TAG)"
-	docker build \
-		-f $(ROOT_DIR)/Dockerfile \
-		-t $(ECR_URI):$(TAG) \
-		-t $(ECR_URI):latest \
-		$(ROOT_DIR)
+# ============================================================================
+# 1) Docker ビルド
+# ============================================================================
+build: build-app build-proxy
 
-## 3) Docker プッシュ
-push: login build
-	@echo "📤  Pushing images to ECR"
-	docker push $(ECR_URI):$(TAG)
-	docker push $(ECR_URI):latest
+build-app:
+	@echo "🐳  [App] Docker build: $(TAG)"
+	docker build --platform linux/amd64 \
+		-f $(APP_DOCKERFILE) \
+		-t $(APP_ECR_URI):$(TAG) \
+		-t $(APP_ECR_URI):latest \
+		$(APP_CONTEXT)
 
-## 4) Terraform plan
+build-proxy:
+	@echo "🐳  [Proxy] Docker build: $(TAG)"
+	docker build --platform linux/amd64 \
+		-f $(PROXY_DOCKERFILE) \
+		-t $(PROXY_ECR_URI):$(TAG) \
+		-t $(PROXY_ECR_URI):latest \
+		$(PROXY_CONTEXT)
+
+# ============================================================================
+# 2) Docker プッシュ
+# ============================================================================
+push: push-app push-proxy
+
+push-app: login build-app
+	@echo "📤  [App] Pushing images to ECR"
+	docker push $(APP_ECR_URI):$(TAG)
+	docker push $(APP_ECR_URI):latest
+
+push-proxy: login build-proxy
+	@echo "📤  [Proxy] Pushing images to ECR"
+	docker push $(PROXY_ECR_URI):$(TAG)
+	docker push $(PROXY_ECR_URI):latest
+
+# ============================================================================
+# 3) Terraform
+# ============================================================================
 plan:
 	@echo "📋  Terraform plan"
 	terraform init -reconfigure -upgrade -input=false
-	terraform plan -input=false -var="image_tag=$(TAG)" -out=plan.tfplan
+	terraform plan -input=false \
+		-var="image_tag=$(TAG)" \
+		-out=plan.tfplan
 
-## 5) Terraform apply
 apply:
 	@echo "🚀  Terraform apply"
 	terraform apply -input=false plan.tfplan
 
-## 6) 一括デプロイ → build / push / plan / apply
+# ============================================================================
+# 4) ワンライナー
+# ============================================================================
 deploy: push plan apply
 	@echo "✅  Deploy complete!  Tag = $(TAG)"
 
-## 7) statefmt
+deploy-all: login build push plan apply
+
+# ============================================================================
+# その他
+# ============================================================================
 fmt:
 	@terraform fmt -recursive
 
-## 8) 破棄
 destroy:
-	terraform destroy -var="image_tag=$(TAG)"
+	terraform destroy -var="app_image_tag=$(TAG)" -var="proxy_image_tag=$(TAG)"

@@ -83,7 +83,7 @@ make pre-commit
 ### アプリケーションの実行
 
 ```sh
-# CSVダッシュボードを実行（http://localhost:8080）
+# CSVダッシュボードを実行（http://localhost:8501
 make run-csv
 
 # Markdownサマライザーを実行（http://localhost:8502）
@@ -123,7 +123,7 @@ make docker-run APP=my_app
 ```
 
 > **備考**: Dockerコマンドは内部的に
-`docker run -p 8080:8080 [-e OPENAI_API_KEY=your_api_key] streamlit-starter [アプリ名]`
+`docker run -p 8501:8501 [-e OPENAI_API_KEY=your_api_key] streamlit-starter [アプリ名]`
 のようなコマンドを実行しています。
 Dockerコンテナ内では`launch.sh`スクリプトを使用してアプリケーションが起動され、コンテナ外部からアクセスできるようにポートが公開されます。
 
@@ -195,11 +195,6 @@ MY_PORT ?= 8504
 .PHONY: run-my-app
 run-my-app: ## My Appの説明（help表示用）
     $(STREAMLIT_CMD) $(MY_APP) --server.port $(MY_PORT)
-
-# Docker実行コマンドを追加
-.PHONY: docker-run-my-app
-docker-run-my-app: docker-build ## My Appをdockerで実行
-    docker run --rm -p $(DOCKER_PORT):8080 $(DOCKER_IMAGE) my_app
 ```
 
 ### カスタマイズとベストプラクティス

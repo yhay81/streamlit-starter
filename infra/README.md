@@ -1,71 +1,61 @@
-# infra README – Streamlit Suite Infrastructure
+# Streamlit Suite インフラ構成 README
 
-このドキュメントは **AWS App Runner で Streamlit Suite を運用するための IaC**（Terraform＋Makefile）だけにフォーカスした説明です。
+このリポジトリは **Streamlit／Shiny アプリを AWS Lightsail Containers で動かすための Infrastructure-as-Code**（Terraform + Makefile）を収録しています。
+初めてデプロイする場合は、手順を詳しく解説した **[HOWTO.md](./HOWTO.md)** を先にご覧ください。
+
+---
+
+## 概要
+
+| 項目 | 内容 |
+|------|------|
+| IaC | Terraform 1.11（S3 バックエンド + `use_lockfile=true`） |
+| コンテナレジストリ | ECR `streamlit-suite`（タグ: `latest` と Git SHA） |
+| 実行基盤 | AWS Lightsail Containers |
+| CI/CD | GitHub Actions または `infra/Makefile` |
+
 アプリの使い方は `apps/README.md` を参照してください。
 
 ---
 
-## 1 概要
+## アーキテクチャ
 
-| 項目 | 内容 |
-|------|------|
-| **IaC** | Terraform 1.11（S3 backend + `use_lockfile=true`） |
-| **コンテナレジストリ** | ECR `streamlit‑suite`（タグ: `latest` と Git SHA） |
-| **実行基盤** | AWS App Runner 3 サービス |
-| **自動起動/停止** | EventBridge Scheduler で平日 08‑21 JST のみ稼働 |
-| **CI/CD** | GitHub Actions または `infra/Makefile` |
+```mermaid
+flowchart LR
+    subgraph GitHub
+        C[Commit / Pull Request]
+    end
+    C -->|Docker build & push| ECR[(Amazon&nbsp;ECR<br>streamlit-suite)]
+    ECR -->|image pull| LS[Lightsail&nbsp;Containers<br>streamlit-suite]
+    TF[(S3&nbsp;Bucket<br>tfstate)] -- backend --> Terraform
+```
 
 ---
 
-## 2 ディレクトリ構成
+## リポジトリ構成
 
 ```text
 .
-├── Dockerfile          # プロジェクトルートに配置
-├── apps/               # Streamlit / Shiny アプリ本体
-└── infra/              # ├── main.tf / variables.tf … Terraform
-                        # └── Makefile              … デプロイ補助
-```
-
-> **Makefile は `infra/Makefile`** に置きます。
-> Docker ビルドコンテキストは 1 つ上のルートに向けています。
-
----
-
-## 3 前提ツール
-
-| ツール | バージョン例 |
-|--------|--------------|
-| Docker | 20.10+ |
-| AWS CLI | v2 |
-| Terraform | 1.11+ |
-| Git | 任意（TAG 自動生成で使用） |
-
-初回のみ Terraform 状態ファイル保存用 S3 バケットを手動作成してください:
-
-```bash
-aws s3 mb s3://streamlit-suite-tfstate --region ap-northeast-1
-aws s3api put-bucket-versioning \
-  --bucket streamlit-suite-tfstate \
-  --versioning-configuration Status=Enabled
+├── Dockerfile          # プロジェクトルート
+├── src/                # Streamlit / Shiny アプリ本体
+└── infra/              # ├── *.tf          … Terraform 設定
+                        # └── Makefile      … デプロイ補助
 ```
 
 ---
 
-## 4 Make コマンド早見表
+## Make コマンド早見表
 
-| コマンド | 処理 | 環境変数 |
-|----------|------|----------|
-| `make build`   | Docker イメージ `latest` と `$(TAG)` をビルド | `TAG` |
-| `make login`   | ECR へログイン | `AWS_PROFILE` `AWS_REGION` |
-| `make push`    | イメージ 2 タグを ECR に push（`login`,`build` 自動実行） | 同上 |
-| `make plan`    | `terraform plan -out plan.tfplan` | `TAG` |
-| `make apply`   | 生成済み plan を適用 |  |
-| `make deploy`  | **build → push → plan → apply** を一括実行 | 同上 |
-| `make destroy` | 全リソース削除 |  |
-| `make fmt`     | Terraform ファイルを整形 |  |
+| コマンド | 目的 | 主な環境変数 |
+|----------|------|-------------|
+| `make build`   | Docker イメージをビルド（`latest` と `$(TAG)`） | `TAG` |
+| `make push`    | ECR にイメージ 2 タグを push（`build`,`login` 自動実行） | `AWS_PROFILE`, `AWS_REGION` |
+| `make plan`    | Terraform 変更差分を確認 (`terraform plan`) | `TAG` |
+| `make apply`   | Plan を適用してデプロイ |  |
+| `make deploy`  | **build → push → plan → apply** を一括実行 | 上記と同じ |
+| `make destroy` | すべてのリソースを削除 |  |
 
-既定値:
+デフォルト値（上書き可）:
 
 ```text
 AWS_PROFILE = default
@@ -74,70 +64,14 @@ ECR_REPO    = streamlit-suite
 TAG         = $(git rev-parse --short HEAD)
 ```
 
-例）`AWS_PROFILE=dev TAG=test make deploy`
-
 ---
 
-## 5 クイックスタート
-
-```bash
-# プロジェクトルートをクローン
-git clone https://github.com/<you>/streamlit-suite.git
-cd streamlit-suite
-
-# 初回のみ: 状態ファイル用 S3 を作成（上記参照）
-
-# infra ディレクトリへ
-cd infra
-
-# ワンライナーでデプロイ
-make deploy                # TAG=git SHA, AWS_PROFILE=default
-
-# URL は apply 出力または AWS コンソールで確認
-```
-
----
-
-## 6 CI/CD との統一
-
-GitHub Actions では
-
-1. Docker build (`docker build -t $ECR_URI:$GITHUB_SHA -t …:latest …`)
-2. push (`docker push` 2 タグ)
-3. `terraform apply -var="image_tag=$GITHUB_SHA"`
-
-を実行し、ローカルの `make deploy` と同一フローを再現します。
-
----
-
-## 7 変数 (`infra/variables.tf`)
+## Terraform 主要変数
 
 | 変数 | 既定値 | 説明 |
 |------|--------|------|
-| `aws_profile` | `"default"` | ローカル terraform 実行用 |
-| `image_tag` | `"latest"` | App Runner に設定する ECR タグ |
-| `resume_cron` | `cron(0 23 ? * MON-FRI *)` | 平日 08:00 JST Resume |
-| `pause_cron` | `cron(0 12 ? * MON-FRI *)` | 平日 21:00 JST Pause |
+| `aws_profile` | `"default"` | ローカル実行時に使う AWS プロファイル |
+| `image_tag` | `"latest"` | Lightsail が pull するイメージタグ |
+| `openai_api_key` | なし（必須） | OpenAI API キー |
 
 ---
-
-## 8 トラブルシューティング
-
-| 症状 | 原因・対処 |
-|------|-----------|
-| `Health check failed` | Dockerfile が **0.0.0.0:8080** で Listen しているか／ポート番号一致か |
-| `ECR image doesn't exist` | push 済みタグと `image_tag` が一致しているか |
-| `StateLock` エラー | 別ターミナルで apply が動いていないか／S3 ロックファイル残存 |
-
----
-
-## 9 リソース削除
-
-```bash
-cd infra
-make destroy   # or terraform destroy
-```
-
----
-
-© 2025 Streamlit Suite Infra

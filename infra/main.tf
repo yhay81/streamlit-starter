@@ -1,11 +1,13 @@
 #########################
-# 0) Backend & Provider
+# Lightsail Containers – Streamlit Suite (experimental)
+# Replaces App Runner. Reuses existing ECR repo and common variables.
 #########################
+
 terraform {
   required_version = "~> 1.11"
   backend "s3" {
     bucket       = "streamlit-suite-tfstate"
-    key          = "apprunner/terraform.tfstate"
+    key          = "lightsail/terraform.tfstate"
     region       = "ap-northeast-1"
     use_lockfile = true
   }
@@ -18,41 +20,63 @@ terraform {
 }
 
 provider "aws" {
-  region = "ap-northeast-1"
-  # GitHub では OIDC で AssumeRole、ローカルでは AWS_PROFILE
+  region  = "ap-northeast-1"
   profile = var.aws_profile
 }
 
+#########################
+# 0) Variables & Locals
+#########################
+
 variable "aws_profile" {
-  type    = string
-  default = "default"
+  description = "AWS profile name when running locally"
+  type        = string
+  default     = "default"
+}
+
+variable "image_tag" {
+  description = "Docker image tag pushed to ECR"
+  type        = string
+  default     = "latest"
+}
+
+variable "openai_api_key" {
+  description = "OpenAI API key used by Streamlit apps"
+  type        = string
+  sensitive   = true
+}
+
+locals {
+  apps = {
+    csv   = { app_file = "csv_dashboard", port = 8501, path = "/csv" }
+    md    = { app_file = "markdown_summarizer", port = 8502, path = "/md" }
+    shiny = { app_file = "shiny_demo", port = 8503, path = "/shiny" }
+  }
+
+  public_app = "proxy" # 逆プロキシを公開
 }
 
 #########################
-# 1) ECR
+# 1) ECR (unchanged)
 #########################
+
 resource "aws_ecr_repository" "app" {
   name                 = "streamlit-suite"
   image_tag_mutability = "MUTABLE"
+  force_delete         = true
+}
 
-  lifecycle { prevent_destroy = true }
+resource "aws_ecr_repository" "proxy" {
+  name                 = "streamlit-proxy"
+  image_tag_mutability = "MUTABLE"
+  force_delete         = true
 }
 
 #########################
-# 2) AutoScaling = 1
+# 2) IAM – Lightsail ↔︎ ECR (private registry access)
 #########################
-resource "aws_apprunner_auto_scaling_configuration_version" "one" {
-  auto_scaling_configuration_name = "one-instance"
-  max_size                        = 1
-  min_size                        = 1
-  max_concurrency                 = 100
-}
 
-###################
-# ③ IAM (AppRunner ↔︎ ECR)
-###################
 data "aws_iam_policy_document" "ecr_pull" {
-  # ① リポジトリ固有の Read 権限
   statement {
     sid = "EcrRepoRead"
     actions = [
@@ -60,10 +84,9 @@ data "aws_iam_policy_document" "ecr_pull" {
       "ecr:BatchGetImage",
       "ecr:BatchCheckLayerAvailability"
     ]
-    resources = [aws_ecr_repository.app.arn]
+    resources = [aws_ecr_repository.app.arn, aws_ecr_repository.proxy.arn]
   }
 
-  # ② トークン取得はリソース指定不可なので "*"
   statement {
     sid       = "EcrAuth"
     actions   = ["ecr:GetAuthorizationToken"]
@@ -71,146 +94,92 @@ data "aws_iam_policy_document" "ecr_pull" {
   }
 }
 
-resource "aws_iam_role" "apprunner_ecr" {
-  name = "AppRunnerECRAccess"
+resource "aws_iam_role" "lightsail_ecr" {
+  name = "LightsailECRAccess"
   assume_role_policy = jsonencode({
     Version : "2012-10-17",
     Statement : [{
       Effect : "Allow",
-      Principal : { Service : "build.apprunner.amazonaws.com" },
+      Principal : { Service : "lightsail.amazonaws.com" },
       Action : "sts:AssumeRole"
     }]
   })
 }
 
-resource "aws_iam_role_policy" "apprunner_ecr" {
-  role   = aws_iam_role.apprunner_ecr.id
+resource "aws_iam_role_policy" "lightsail_ecr" {
+  role   = aws_iam_role.lightsail_ecr.id
   policy = data.aws_iam_policy_document.ecr_pull.json
 }
 
 #########################
-# 4) Streamlit Apps
+# 3) Lightsail Container Service
 #########################
-locals {
-  app_files = ["csv_dashboard", "markdown_summarizer", "shiny_demo"]
-}
 
-# GitHub から渡す値。手元実行時は "latest" で OK
-variable "image_tag" {
-  type    = string
-  default = "latest"
-}
+resource "aws_lightsail_container_service" "this" {
+  name        = "streamlit-suite"
+  power       = "small" # nano|micro|small|medium|large|xlarge xxlarge
+  scale       = 1       # number of running containers (1‒20)
+  is_disabled = false
 
-variable "openai_api_key" {
-  type        = string
-  sensitive   = true
-  description = "OpenAI API key used by Streamlit apps."
-}
-
-resource "aws_apprunner_service" "streamlit" {
-  for_each     = toset(local.app_files)
-  service_name = "st-${each.key}"
-
-  source_configuration {
-    authentication_configuration {
-      access_role_arn = aws_iam_role.apprunner_ecr.arn
+  private_registry_access {
+    ecr_image_puller_role {
+      is_active = true
     }
-    image_repository {
-      image_identifier      = "${aws_ecr_repository.app.repository_url}:${var.image_tag}"
-      image_repository_type = "ECR"
-      image_configuration {
-        port = 8080
-        runtime_environment_variables = {
-          APP            = each.key
-          OPENAI_API_KEY = var.openai_api_key
-        }
+  }
+}
+
+resource "aws_lightsail_container_service_deployment_version" "current" {
+  service_name = aws_lightsail_container_service.this.name
+
+  # ---- 1. 逆プロキシ（公開コンテナ） --------------------------
+  container {
+    container_name = "proxy"
+    image          = "${aws_ecr_repository.proxy.repository_url}:${var.image_tag}"
+    ports          = { "80" = "HTTP" }
+  }
+
+  # ---- 2. 各 Streamlit アプリ ---------------------------------
+  dynamic "container" {
+    # → each.key  : csv-dashboard
+    # → each.value: { app_file = "...", port = ..., path = "..." }
+    for_each = local.apps
+    content {
+      container_name = container.key
+      image          = "${aws_ecr_repository.app.repository_url}:${var.image_tag}"
+
+      # Lightsail では “このポートを開く” 宣言が必須
+      ports = { tostring(container.value.port) = "HTTP" } # 例: "8501" = "HTTP"
+
+      # Streamlit 起動用の環境変数
+      environment = {
+        APP                            = container.value.app_file
+        OPENAI_API_KEY                 = var.openai_api_key
+        STREAMLIT_SERVER_PORT          = tostring(container.value.port)
+        STREAMLIT_SERVER_BASE_URL_PATH = container.value.path
       }
     }
   }
 
-  health_check_configuration {
-    protocol            = "HTTP"
-    path                = "/healthz"
-    interval            = 10
-    timeout             = 5
-    healthy_threshold   = 1
-    unhealthy_threshold = 5
-  }
-
-  auto_scaling_configuration_arn = aws_apprunner_auto_scaling_configuration_version.one.arn
-}
-
-output "app_urls" {
-  value = { for k, s in aws_apprunner_service.streamlit : k => s.service_url }
-}
-
-#########################
-# 5) EventBridge Scheduler
-#########################
-variable "resume_cron" {
-  # EventBridge Scheduler は UTC ベースなので 23:00 = 翌日 08:00 JST
-  default = "cron(0 23 ? * MON-FRI *)"
-}
-variable "pause_cron" {
-  # 12:00 UTC = 21:00 JST
-  default = "cron(0 12 ? * MON-FRI *)"
-}
-
-data "aws_iam_policy_document" "scheduler_trust" {
-  statement {
-    actions = ["sts:AssumeRole"]
-    principals {
-      type        = "Service"
-      identifiers = ["scheduler.amazonaws.com"]
+  # ---- 3. 公開エンドポイント (逆プロキシ) -----------------------
+  public_endpoint {
+    container_name = "proxy"
+    container_port = 80
+    health_check {
+      path                = "/"
+      healthy_threshold   = 2
+      unhealthy_threshold = 2
+      interval_seconds    = 30
+      timeout_seconds     = 5
+      success_codes       = "200-299"
     }
   }
 }
 
-resource "aws_iam_role" "scheduler" {
-  name               = "apprunner-scheduler-role"
-  assume_role_policy = data.aws_iam_policy_document.scheduler_trust.json
-}
+#########################
+# 4) Outputs
+#########################
 
-resource "aws_iam_role_policy" "scheduler" {
-  role = aws_iam_role.scheduler.id
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = ["apprunner:PauseService", "apprunner:ResumeService"]
-        Resource = [for s in aws_apprunner_service.streamlit : s.arn]
-      }
-    ]
-  })
-}
-
-locals {
-  services = { for k, s in aws_apprunner_service.streamlit : k => s.arn }
-}
-
-resource "aws_scheduler_schedule" "pause" {
-  for_each            = local.services
-  name                = "pause-${each.key}"
-  schedule_expression = var.pause_cron
-  flexible_time_window { mode = "OFF" }
-
-  target {
-    arn      = "arn:aws:scheduler:::aws-sdk:apprunner:PauseService"
-    role_arn = aws_iam_role.scheduler.arn
-    input    = jsonencode({ ServiceArn = each.value })
-  }
-}
-
-resource "aws_scheduler_schedule" "resume" {
-  for_each            = local.services
-  name                = "resume-${each.key}"
-  schedule_expression = var.resume_cron
-  flexible_time_window { mode = "OFF" }
-
-  target {
-    arn      = "arn:aws:scheduler:::aws-sdk:apprunner:ResumeService"
-    role_arn = aws_iam_role.scheduler.arn
-    input    = jsonencode({ ServiceArn = each.value })
-  }
+output "lightsail_endpoint" {
+  description = "Public URL for the Streamlit service"
+  value       = aws_lightsail_container_service.this.url
 }

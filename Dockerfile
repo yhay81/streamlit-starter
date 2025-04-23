@@ -26,6 +26,6 @@ USER streamlit
 ENV PATH="/home/streamlit/.local/bin:/app/.venv/bin:${PATH}"
 ENV PYTHONPATH="/app"
 
-EXPOSE 8080
+EXPOSE 8501 8502 8503
 
 ENTRYPOINT ["launch"]

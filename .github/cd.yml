@@ -1,0 +1,41 @@
+name: Build & Deploy all Streamlit apps
+on: { push: { branches: [ main ] } }
+
+env:
+  AWS_REGION: ap-northeast-1
+  ECR_REPO: streamlit-suite
+  IMAGE_TAG: ${{ github.sha }}
+  APP_FILES: '["app1.py","app2.py"]'   # ← 追加・削除はここだけ
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- AWS OIDC ---
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/github-oidc
+          aws-region: ${{ env.AWS_REGION }}
+
+      # --- ECR login & push ---
+      - uses: aws-actions/amazon-ecr-login@v2
+      - name: Build && Push
+        run: |
+          IMAGE=$(aws sts get-caller-identity --query 'Account' --output text).dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${IMAGE_TAG}
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+
+      # --- Terraform ---
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: 1.7.5 }
+
+      - run: terraform -chdir=infra init
+      - run: terraform -chdir=infra apply -auto-approve \
+               -var="image_tag=${IMAGE_TAG}" \
+               -var="app_files=${APP_FILES}"

@@ -5,6 +5,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from shiny import App, Inputs, Outputs, Session, reactive, render, ui
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse
+from starlette.routing import Mount, Route
 
 # --- デモ用データ ------------------------------------------------------------
 rng = np.random.default_rng(42)
@@ -99,4 +103,16 @@ def server(input_: Inputs, output: Outputs, _session: Session) -> None:
         yield buf.getvalue()
 
 
-app = App(app_ui, server)
+shiny_app = App(app_ui, server)
+
+
+def ping(_: Request) -> PlainTextResponse:
+    return PlainTextResponse("ok")
+
+
+routes = [
+    Route("/healthz", ping, methods=["GET"]),
+    Mount("/", shiny_app),
+]
+
+app = Starlette(routes=routes)

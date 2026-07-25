@@ -16,6 +16,17 @@
 
 アプリの使い方は `apps/README.md` を参照してください。
 
+### GitHub Actions からの公開
+
+長期 AWS access key は保存しない。対象 AWS account を決め、GitHub Actions の repository
+variable `AWS_ROLE_ARN` に OIDC 用 IAM role の完全な ARN を設定する。role の trust policy は
+audience を `sts.amazonaws.com`、subject を
+`repo:yhay81/streamlit-starter:environment:production` に限定する。
+
+`AWS_ROLE_ARN` が未設定の間、delivery job は安全に skip される。設定後は `production`
+environment の承認を経て、Git SHA 固定の ECR image を push し、同じ digest に SLSA
+provenance と SPDX SBOM を OCI referrer として保存してから Terraform を適用する。
+
 ---
 
 ## アーキテクチャ

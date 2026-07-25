@@ -58,6 +58,13 @@ lint: ## コードの静的解析
 	uv run pre-commit run -a && \
 	uv run mypy src
 
+.PHONY: audit
+audit: ## uv.lock の全依存を既知脆弱性データベースと照合
+	@audit_dir="$$(mktemp -d)"; \
+	uv export --quiet --frozen --format pylock.toml --no-emit-project \
+	  --output-file "$$audit_dir/pylock.toml"; \
+	uv run pip-audit --cache-dir "$$audit_dir/cache" --locked "$$audit_dir"
+
 # --------------------------------------------------------------
 # ローカルアプリ実行
 # --------------------------------------------------------------

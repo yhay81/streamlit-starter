@@ -386,7 +386,7 @@ def call_openai(md: str) -> SummaryResponse:
 
 # ボタンが押されたらキャッシュをクリア
 if rerun_button:
-    call_openai.clear()  # type: ignore[attr-defined]
+    call_openai.clear()
     st.success("キャッシュをクリアしました。新しい要約を生成します。")
 
 with st.spinner("OpenAI へ問い合わせ中…"):

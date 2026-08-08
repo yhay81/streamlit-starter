@@ -15,7 +15,7 @@ permissions: {}
 jobs:
   configuration:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 1
     outputs:
       enabled: ${{ steps.aws.outputs.enabled }}
     steps:
@@ -40,7 +40,7 @@ jobs:
     needs: configuration
     if: needs.configuration.outputs.enabled == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 1
     environment: production
     permissions:
       artifact-metadata: write
@@ -110,7 +110,7 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 1
     environment: production
     permissions:
       contents: read
